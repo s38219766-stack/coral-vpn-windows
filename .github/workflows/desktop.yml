@@ -5,36 +5,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Найти папки проекта
+        run: |
+          f=$(find . -path ./.git -prune -o -path '*/ct/go.mod' -print | head -1)
+          if [ -z "$f" ]; then
+            echo "Не найден файл ct/go.mod. Структура репозитория сейчас такая:"
+            find . -not -path './.git/*' -maxdepth 3 | sort | head -60
+            echo "Нужно, чтобы рядом лежали папки desktop и ct (в каждой свои файлы .go и go.mod)."
+            exit 1
+          fi
+          ROOT=$(dirname "$(dirname "$f")")
+          echo "Корень проекта: $ROOT"
+          test -f "$ROOT/desktop/go.mod" || { echo "Не найден $ROOT/desktop/go.mod"; exit 1; }
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5
         with:
-          go-version-file: ct/go.mod
+          go-version: "1.26"
+          check-latest: true
       - name: Тесты
         run: |
-          (cd ct && go test ./...)
-          (cd desktop && go test ./...)
+          (cd "$ROOT/ct" && go test ./...)
+          (cd "$ROOT/desktop" && go test ./...)
       - name: Сборка и упаковка
         run: |
           set -e
           V=1.14.4
-          mkdir -p out dl
+          OUT="$PWD/out"; mkdir -p "$OUT" dl
           for os in linux windows; do
             ext=""; [ "$os" = windows ] && ext=".exe"
-            d="out/coral-$os-amd64"; mkdir -p "$d"
-            (cd desktop && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "../$d/coral$ext" .)
-            (cd ct && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "../$d/ct$ext" .)
-            cp desktop/README.md LICENSES.md "$d/"
+            d="$OUT/coral-$os-amd64"; mkdir -p "$d"
+            (cd "$ROOT/desktop" && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$d/coral$ext" .)
+            (cd "$ROOT/ct" && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$d/ct$ext" .)
+            cp "$ROOT/desktop/README.md" "$d/" 2>/dev/null || true
+            cp "$ROOT/LICENSES.md" "$d/" 2>/dev/null || true
           done
           curl -fL -o dl/sb-linux.tgz "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-linux-amd64.tar.gz"
           tar xzf dl/sb-linux.tgz -C dl
-          cp "dl/sing-box-$V-linux-amd64/sing-box" out/coral-linux-amd64/
+          cp "dl/sing-box-$V-linux-amd64/sing-box" "$OUT/coral-linux-amd64/"
           curl -fL -o dl/sb-win.zip "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-windows-amd64.zip"
           unzip -o dl/sb-win.zip -d dl
-          cp "dl/sing-box-$V-windows-amd64/sing-box.exe" out/coral-windows-amd64/
+          cp "dl/sing-box-$V-windows-amd64/sing-box.exe" "$OUT/coral-windows-amd64/"
           curl -fL -o dl/wintun.zip https://www.wintun.net/builds/wintun-0.14.1.zip
           unzip -o dl/wintun.zip -d dl
-          cp dl/wintun/bin/amd64/wintun.dll out/coral-windows-amd64/
-          (cd out && tar czf coral-linux-amd64.tar.gz coral-linux-amd64 && zip -qr coral-windows-amd64.zip coral-windows-amd64)
-          ls -la out
+          cp dl/wintun/bin/amd64/wintun.dll "$OUT/coral-windows-amd64/"
+          (cd "$OUT" && tar czf coral-linux-amd64.tar.gz coral-linux-amd64 && zip -qr coral-windows-amd64.zip coral-windows-amd64)
+          ls -la "$OUT"
       - uses: actions/upload-artifact@v4
         with:
           name: coral-desktop-linux
