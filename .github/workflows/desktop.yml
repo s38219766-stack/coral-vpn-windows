@@ -1,0 +1,45 @@
+name: Desktop
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ct/go.mod
+      - name: Тесты
+        run: |
+          (cd ct && go test ./...)
+          (cd desktop && go test ./...)
+      - name: Сборка и упаковка
+        run: |
+          set -e
+          V=1.14.4
+          mkdir -p out dl
+          for os in linux windows; do
+            ext=""; [ "$os" = windows ] && ext=".exe"
+            d="out/coral-$os-amd64"; mkdir -p "$d"
+            (cd desktop && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "../$d/coral$ext" .)
+            (cd ct && CGO_ENABLED=0 GOOS=$os GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "../$d/ct$ext" .)
+            cp desktop/README.md LICENSES.md "$d/"
+          done
+          curl -fL -o dl/sb-linux.tgz "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-linux-amd64.tar.gz"
+          tar xzf dl/sb-linux.tgz -C dl
+          cp "dl/sing-box-$V-linux-amd64/sing-box" out/coral-linux-amd64/
+          curl -fL -o dl/sb-win.zip "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-windows-amd64.zip"
+          unzip -o dl/sb-win.zip -d dl
+          cp "dl/sing-box-$V-windows-amd64/sing-box.exe" out/coral-windows-amd64/
+          curl -fL -o dl/wintun.zip https://www.wintun.net/builds/wintun-0.14.1.zip
+          unzip -o dl/wintun.zip -d dl
+          cp dl/wintun/bin/amd64/wintun.dll out/coral-windows-amd64/
+          (cd out && tar czf coral-linux-amd64.tar.gz coral-linux-amd64 && zip -qr coral-windows-amd64.zip coral-windows-amd64)
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-desktop-linux
+          path: out/coral-linux-amd64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-desktop-windows
+          path: out/coral-windows-amd64.zip
